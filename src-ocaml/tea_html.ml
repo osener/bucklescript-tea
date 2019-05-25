@@ -14,6 +14,8 @@ let lazy1 key gen = lazyGen key gen
 
 let node ?(namespace="") tagName ?(key="") ?(unique="") props nodes = fullnode namespace tagName key unique props nodes
 
+let portal ~parent nodes = Portal (parent, nodes)
+
 (* let embedProgram main = custom *)
 
 

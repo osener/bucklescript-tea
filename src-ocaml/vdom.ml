@@ -40,6 +40,7 @@ type 'msg t =
   | LazyGen of string * (unit -> 'msg t) * 'msg t ref
   (* Tagger (tagger, vdom) *)
   | Tagger of ('msg applicationCallbacks ref -> 'msg applicationCallbacks ref) * 'msg t
+  | Portal of Web.Node.t * 'msg t list
   (* TODO: support Custom *)
   (* Custom (key, cbAdd, cbRemove, cbChange, properties, children) *)
   (* | Custom of string * (unit -> Web.Node.t) * (Web.Node.t -> unit) * *)
@@ -138,6 +139,7 @@ let rec renderToHtmlString : ('msg t -> string)
     let vdom = gen () in
     renderToHtmlString vdom
   | Tagger (_tagger, vdom) -> renderToHtmlString vdom
+  | Portal (_, vdoms) ->  String.concat "" (List.map (fun v -> renderToHtmlString v) vdoms)
 
 
 (* TODO:  Make a vdom 'patcher' that binds into the actual DOM for hot-loading into an existing template *)
@@ -408,6 +410,17 @@ and patchVNodesOnElems_CreateElement
   | Tagger (tagger, vdom) ->
     (* let () = Js.log ("Tagger", "creating", tagger, vdom) in *)
     patchVNodesOnElems_CreateElement (tagger callbacks) vdom
+  | Portal (elem, nodes) ->
+    (* Remove existing children *)
+    while Js.Array.length (Web.Node.childNodes elem) > 0 do
+      match Js.Null.toOption (Web.Node.firstChild elem) with
+      | None -> ()
+      | Some firstChild ->
+        let _removedChild = Web.Node.removeChild elem firstChild in
+        ()
+    done;
+    let () = patchVNodesOnElems callbacks elem (Web.Node.childNodes elem) 0 [] nodes in
+    Web.Document.createComment ""
 
 and patchVNodesOnElems_MutateNode
     (callbacks: 'msg applicationCallbacks ref)
@@ -446,6 +459,10 @@ and patchVNodesOnElems
   : unit =
   (* let () = Js.log ("patchVNodesOnElems", elem, elems, idx, oldVNodes, newVNodes) in *)
   match [@ocaml.warning "-4"] oldVNodes, newVNodes with
+  | (Portal (oldElem, oldVdom) :: oldRest), (Portal (newElem, newVdom) :: newRest)
+    when oldElem == newElem ->
+    let () = patchVNodesOnElems callbacks newElem (Web.Node.childNodes newElem) 0 oldVdom newVdom in
+    patchVNodesOnElems callbacks elem elems (idx + 1) oldRest newRest;
   | Tagger (_oldTagger, oldVdom) :: oldRest, _ ->
     (* let () = Js.log ("Tagger", "old", oldTagger, oldVdom) in *)
     patchVNodesOnElems callbacks elem elems idx (oldVdom :: oldRest) newVNodes
@@ -544,11 +561,22 @@ and patchVNodesOnElems
           let () = patchVNodesOnElems_MutateNode callbacks elem elems idx oldNode newNode in
           patchVNodesOnElems callbacks elem elems (idx+1) oldRest newRest
       )
-  | _oldVnode :: oldRest, newNode :: newRest ->
+  | oldVnode :: oldRest, newNode :: newRest ->
     let oldChild = elems.(idx) in
     let newChild = patchVNodesOnElems_CreateElement callbacks newNode in
     let _attachedChild = Web.Node.insertBefore elem newChild oldChild in
     let _removedChild = Web.Node.removeChild elem oldChild in
+    (match oldVnode with
+     | Portal (portalElem, _) ->
+       (* Remove existing children *)
+       while Js.Array.length (Web.Node.childNodes portalElem) > 0 do
+         match Js.Null.toOption (Web.Node.firstChild portalElem) with
+         | None -> ()
+         | Some firstChild ->
+           let _removedChild = Web.Node.removeChild portalElem firstChild in
+           ()
+       done
+     | _ -> ());
     patchVNodesOnElems callbacks elem elems (idx+1) oldRest newRest
 
 
@@ -584,4 +612,3 @@ let map : ('a -> 'b) -> 'a t -> 'b t = fun func vdom ->
       { enqueue = (fun msg -> !callbacks.enqueue (func msg))
       } in
   Tagger (Obj.magic tagger, Obj.magic vdom)
-

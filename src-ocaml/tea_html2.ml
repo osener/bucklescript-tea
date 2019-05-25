@@ -17,6 +17,8 @@ let noNode = noNode
 
 let lazy1 key gen = lazyGen key gen
 
+let portal ~parent nodes = Portal (parent, nodes)
+
 (** {1 Tags} *)
 
 (** {2 Headers} *)
